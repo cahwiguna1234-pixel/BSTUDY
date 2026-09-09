@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Work+Sans:wght@400;500;600;700&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/canvas-confetti/1.9.2/confetti.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 :root{
   --paper:#F3EFE3;
@@ -702,6 +703,23 @@ const SUBJECT_EMOJIS = ['📐','📚','🧪','🎨','🌍','💻','🎵','⚽','
 const DAYS = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'];
 const STORE_KEY = 'bstudy-data';
 
+/* ---------- Supabase ---------- */
+// TODO: ganti dengan URL & anon key project Supabase kamu sendiri
+// (Dashboard > Project Settings > API)
+const SUPABASE_URL = 'https://feihyxzldxcybxcoswsd.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZlaWh5eHpsZHhjeWJ4Y29zd3NkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NjE3NDUsImV4cCI6MjEwNDUzNzc0NX0.otHOfO7Xdlgp2zu0Lr5cxQJIzX8vmUUf0KkdUo8lHUk';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let currentUserId = null;
+
+async function ensureAuth(){
+  const { data: { session } } = await supabase.auth.getSession();
+  if(session && session.user){ currentUserId = session.user.id; return; }
+  // belum ada sesi -> login anonim otomatis
+  const { data, error } = await supabase.auth.signInAnonymously();
+  if(error){ console.error('gagal login anonim', error); return; }
+  currentUserId = data.user.id;
+}
+
 let state = {
   subjects: [], tasks: [], notes: [], decks: [],
   sessions: [], schedule: {},
@@ -716,9 +734,17 @@ function todayStr(d=new Date()){ return d.toISOString().slice(0,10); }
 
 async function loadState(){
   try{
-    const res = await window.storage.get(STORE_KEY, false);
-    if(res && res.value){ state = Object.assign(state, JSON.parse(res.value)); }
-  }catch(e){ /* belum ada data */ }
+    await ensureAuth();
+    if(currentUserId){
+      const { data, error } = await supabase
+        .from('bstudy_data')
+        .select('data')
+        .eq('user_id', currentUserId)
+        .maybeSingle();
+      if(error) throw error;
+      if(data && data.data){ state = Object.assign(state, data.data); }
+    }
+  }catch(e){ console.error('gagal memuat data', e); /* lanjut dengan state kosong */ }
   seedIfEmpty();
   renderAll();
 }
@@ -726,7 +752,13 @@ let saveTimer=null;
 function saveState(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
-    try{ await window.storage.set(STORE_KEY, JSON.stringify(state), false); }catch(e){ console.error('gagal menyimpan', e); }
+    try{
+      if(!currentUserId) await ensureAuth();
+      const { error } = await supabase
+        .from('bstudy_data')
+        .upsert({ user_id: currentUserId, data: state }, { onConflict: 'user_id' });
+      if(error) throw error;
+    }catch(e){ console.error('gagal menyimpan', e); }
   }, 250);
 }
 function seedIfEmpty(){
