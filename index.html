@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Work+Sans:wght@400;500;600;700&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/canvas-confetti/1.9.2/confetti.browser.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{
   --paper:#F3EFE3;
@@ -393,6 +393,10 @@ label{font-size:11.5px;color:var(--ink-soft);font-weight:700;display:block;margi
     <nav class="tabs" id="tabs"></nav>
     <div class="sidebar-foot">
       <div class="streak-chip"><div class="flame">🔥</div><div><div class="num" id="streak-mini">0</div><div class="lbl">hari beruntun</div></div></div>
+      <div id="account-box" style="margin-top:10px;font-size:11px;color:#A9C6DA;display:none;">
+        <div id="account-email" style="margin-bottom:6px;word-break:break-all;"></div>
+        <button class="btn secondary small" style="width:100%;" onclick="authSignOut()">Keluar</button>
+      </div>
     </div>
   </div>
 
@@ -567,6 +571,21 @@ label{font-size:11.5px;color:var(--ink-soft);font-weight:700;display:block;margi
 </div>
 
 <!-- MODALS -->
+<div class="modal-bg active" id="modal-auth" style="z-index:100;">
+  <div class="modal">
+    <h3>Masuk ke BSTUDY</h3>
+    <p style="font-size:12.5px;color:var(--ink-soft);margin-top:-8px;">Masuk supaya datamu tersimpan dan bisa dibuka dari HP maupun laptop.</p>
+    <div class="field"><label>Email</label><input type="email" id="auth-email" placeholder="nama@email.com"></div>
+    <div class="field"><label>Password</label><input type="password" id="auth-pass" placeholder="Minimal 6 karakter"></div>
+    <div id="auth-msg" style="font-size:12px;color:var(--danger);margin-bottom:10px;"></div>
+    <div class="modal-close-row" style="justify-content:space-between;">
+      <button class="btn secondary" onclick="authSignUp()">Daftar akun baru</button>
+      <button class="btn" onclick="authSignIn()">Masuk</button>
+    </div>
+    <p id="auth-offline-note" style="font-size:11px;color:var(--ink-faint);margin-top:14px;display:none;">Supabase belum diatur — data akan disimpan hanya di perangkat ini.</p>
+  </div>
+</div>
+
 <div class="modal-bg" id="modal-subject">
   <div class="modal">
     <h3>Mata pelajaran baru</h3>
@@ -694,6 +713,109 @@ function boom(x=0.5,y=0.4){
   }catch(e){}
 }
 
+/* ================= SUPABASE CONFIG =================
+   Isi dua nilai ini dengan Project URL dan anon public key dari
+   Project Settings > Data API di dashboard Supabase-mu.
+   Selama masih kosong ('' ), aplikasi otomatis jalan mode offline (localStorage saja).
+*/
+const SUPABASE_URL = 'https://fyxetbltiivhyfunzert.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5eGV0Ymx0aWl2aHlmdW56ZXJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5OTQwMzcsImV4cCI6MjEwNDU3MDAzN30.qgsBdwzNVLkgXOq7smS5mcwWuP3KoNGtCYyWG9_0jnE';
+
+const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY)
+  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+let currentUser = null;
+
+/* ================= AUTH ================= */
+async function initAuth(){
+  if(!supabaseClient){
+    // Mode offline: sembunyikan modal login, langsung pakai localStorage
+    document.getElementById('modal-auth').classList.remove('active');
+    document.getElementById('auth-offline-note').style.display = 'block';
+    loadState();
+    return;
+  }
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(session){ currentUser = session.user; onLoggedIn(); }
+
+  supabaseClient.auth.onAuthStateChange((event, session)=>{
+    if(session && (!currentUser || currentUser.id!==session.user.id)){
+      currentUser = session.user; onLoggedIn();
+    } else if(!session){
+      currentUser = null;
+      document.getElementById('modal-auth').classList.add('active');
+      document.getElementById('account-box').style.display = 'none';
+    }
+  });
+}
+function authMsg(text){ document.getElementById('auth-msg').textContent = text || ''; }
+async function authSignUp(){
+  const email = document.getElementById('auth-email').value.trim();
+  const pass = document.getElementById('auth-pass').value;
+  if(!email || pass.length<6){ authMsg('Isi email dan password minimal 6 karakter.'); return; }
+  const { error } = await supabaseClient.auth.signUp({ email, password: pass });
+  if(error){ authMsg(error.message); return; }
+  authMsg('Akun dibuat. Jika diminta konfirmasi email, cek inbox-mu. Kalau tidak, langsung klik "Masuk".');
+}
+async function authSignIn(){
+  const email = document.getElementById('auth-email').value.trim();
+  const pass = document.getElementById('auth-pass').value;
+  if(!email || !pass){ authMsg('Isi email dan password.'); return; }
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password: pass });
+  if(error){ authMsg(error.message); return; }
+  authMsg('');
+}
+async function authSignOut(){
+  if(supabaseClient) await supabaseClient.auth.signOut();
+  location.reload();
+}
+async function onLoggedIn(){
+  document.getElementById('modal-auth').classList.remove('active');
+  document.getElementById('account-box').style.display = 'block';
+  document.getElementById('account-email').textContent = currentUser.email;
+  await loadState();
+}
+
+/* ================= STORAGE ADAPTER =================
+   Urutan prioritas:
+   1) Supabase (kalau dikonfigurasi & user sudah login) -> tersimpan di server, sinkron lintas device
+   2) window.storage (kalau dijalankan sebagai Artifact Claude)
+   3) localStorage browser (fallback offline)
+*/
+async function storageGet(key){
+  if (supabaseClient && currentUser) {
+    try {
+      const { data, error } = await supabaseClient
+        .from('bstudy_data').select('data').eq('user_id', currentUser.id).maybeSingle();
+      if (!error && data) return JSON.stringify(data.data);
+      if (!error && !data) return null; // user baru, belum ada baris
+    } catch(e){ console.error('Gagal ambil data dari Supabase, coba fallback', e); }
+  }
+  if (window.storage && typeof window.storage.get === 'function') {
+    try {
+      const res = await window.storage.get(key, false);
+      return res ? res.value : null;
+    } catch(e){ /* lanjut fallback */ }
+  }
+  try { return localStorage.getItem(key); } catch(e){ return null; }
+}
+async function storageSet(key, value){
+  if (supabaseClient && currentUser) {
+    try {
+      const parsed = JSON.parse(value);
+      const { error } = await supabaseClient.from('bstudy_data')
+        .upsert({ user_id: currentUser.id, data: parsed, updated_at: new Date().toISOString() });
+      if (!error) return true;
+      console.error('Supabase upsert error', error);
+    } catch(e){ console.error('Gagal simpan ke Supabase, coba fallback', e); }
+  }
+  if (window.storage && typeof window.storage.set === 'function') {
+    try { await window.storage.set(key, value, false); return true; } catch(e){ /* fallback */ }
+  }
+  try { localStorage.setItem(key, value); return true; } catch(e){ console.error('Gagal menyimpan data', e); return false; }
+}
+
 /* ================= STATE ================= */
 const SUBJECT_COLORS = [
   {name:'coral', hex:'#E8654A'},{name:'mint', hex:'#3E8F72'},{name:'sky', hex:'#3E92CC'},
@@ -702,23 +824,6 @@ const SUBJECT_COLORS = [
 const SUBJECT_EMOJIS = ['📐','📚','🧪','🎨','🌍','💻','🎵','⚽','📖','🧬','🗣️','🏛️','⚗️','🎭','🔬'];
 const DAYS = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'];
 const STORE_KEY = 'bstudy-data';
-
-/* ---------- Supabase ---------- */
-// TODO: ganti dengan URL & anon key project Supabase kamu sendiri
-// (Dashboard > Project Settings > API)
-const SUPABASE_URL = 'https://ucxsgimcxrcuebqbgyey.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVjeHNnaW1jeHJjdWVicWJneWV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NjAxMjEsImV4cCI6MjEwNDUzNjEyMX0.yBc-NdylYeGAJ2Sdr_KuMZPlsWq9IYcxwHoTTU6Nypo';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-let currentUserId = null;
-
-async function ensureAuth(){
-  const { data: { session } } = await supabase.auth.getSession();
-  if(session && session.user){ currentUserId = session.user.id; return; }
-  // belum ada sesi -> login anonim otomatis
-  const { data, error } = await supabase.auth.signInAnonymously();
-  if(error){ console.error('gagal login anonim', error); return; }
-  currentUserId = data.user.id;
-}
 
 let state = {
   subjects: [], tasks: [], notes: [], decks: [],
@@ -734,17 +839,9 @@ function todayStr(d=new Date()){ return d.toISOString().slice(0,10); }
 
 async function loadState(){
   try{
-    await ensureAuth();
-    if(currentUserId){
-      const { data, error } = await supabase
-        .from('bstudy_data')
-        .select('data')
-        .eq('user_id', currentUserId)
-        .maybeSingle();
-      if(error) throw error;
-      if(data && data.data){ state = Object.assign(state, data.data); }
-    }
-  }catch(e){ console.error('gagal memuat data', e); /* lanjut dengan state kosong */ }
+    const raw = await storageGet(STORE_KEY);
+    if(raw){ state = Object.assign(state, JSON.parse(raw)); }
+  }catch(e){ /* belum ada data */ }
   seedIfEmpty();
   renderAll();
 }
@@ -752,13 +849,7 @@ let saveTimer=null;
 function saveState(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
-    try{
-      if(!currentUserId) await ensureAuth();
-      const { error } = await supabase
-        .from('bstudy_data')
-        .upsert({ user_id: currentUserId, data: state }, { onConflict: 'user_id' });
-      if(error) throw error;
-    }catch(e){ console.error('gagal menyimpan', e); }
+    await storageSet(STORE_KEY, JSON.stringify(state));
   }, 250);
 }
 function seedIfEmpty(){
@@ -806,7 +897,6 @@ const HERO_MESSAGES = [
   "Sedikit demi sedikit, lama-lama jadi bukit ✨","Kamu lebih kuat dari rasa malasmu 💪","Satu sesi lagi, satu langkah lebih dekat 🚀","Konsistensi kecil hari ini, hasil besar nanti 🌱"
 ];
 function renderDashboard(){
-  document.getElementById('today-date') // no-op guard
   const hour = new Date().getHours();
   document.getElementById('greeting').textContent = (hour<11?'Selamat pagi!':hour<15?'Selamat siang!':hour<18?'Selamat sore!':'Selamat malam!');
   document.getElementById('hero-msg').textContent = HERO_MESSAGES[new Date().getDate()%HERO_MESSAGES.length];
@@ -1254,7 +1344,7 @@ function renderStats(){
 }
 
 /* ================= INIT ================= */
-loadState();
+initAuth();
 </script>
 </body>
 </html>
