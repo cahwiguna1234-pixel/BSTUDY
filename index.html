@@ -545,7 +545,10 @@ label{font-size:11.5px;color:var(--ink-soft);font-weight:700;display:block;margi
       <div class="notes-layout">
         <div class="notes-list" id="notes-list"></div>
         <div class="note-editor" id="note-editor" style="display:none;">
-          <input type="text" class="title-input" id="note-title" placeholder="Judul catatan">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+            <input type="text" class="title-input" id="note-title" placeholder="Judul catatan" style="flex:1;">
+            <button class="btn danger small" onclick="deleteNote()" style="flex-shrink:0;margin-top:2px;">🗑️ Hapus</button>
+          </div>
           <select id="note-subject" style="width:220px;margin-bottom:12px;"></select>
           <textarea id="note-body" placeholder="Tulis catatanmu di sini..."></textarea>
         </div>
@@ -583,6 +586,28 @@ label{font-size:11.5px;color:var(--ink-soft);font-weight:700;display:block;margi
       <button class="btn" onclick="authSignIn()">Masuk</button>
     </div>
     <p id="auth-offline-note" style="font-size:11px;color:var(--ink-faint);margin-top:14px;display:none;">Supabase belum diatur — data akan disimpan hanya di perangkat ini.</p>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-confirm-subject">
+  <div class="modal" style="max-width:340px;">
+    <h3>Hapus mata pelajaran ini?</h3>
+    <p style="font-size:13.5px;color:var(--ink-soft);margin-top:-8px;">Semua topik di dalamnya juga akan terhapus. Tindakan ini tidak bisa dibatalkan.</p>
+    <div class="modal-close-row">
+      <button class="btn secondary" onclick="closeModal('modal-confirm-subject')">Batal</button>
+      <button class="btn danger" onclick="confirmDeleteSubject()">Ya, hapus</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-confirm-note">
+  <div class="modal" style="max-width:340px;">
+    <h3>Hapus catatan ini?</h3>
+    <p style="font-size:13.5px;color:var(--ink-soft);margin-top:-8px;">Catatan yang sudah dihapus tidak bisa dikembalikan.</p>
+    <div class="modal-close-row">
+      <button class="btn secondary" onclick="closeModal('modal-confirm-note')">Batal</button>
+      <button class="btn danger" onclick="confirmDeleteNote()">Ya, hapus</button>
+    </div>
   </div>
 </div>
 
@@ -993,6 +1018,7 @@ function renderSubjects(){
   grid.innerHTML = state.subjects.map((s,i)=>subjectCardHtml(s,true,i)).join('');
 }
 let activeSubjectId=null;
+let pendingDeleteSubjectId=null;
 function openSubjectDetail(id){
   activeSubjectId=id;
   const s = subjectById(id);
@@ -1033,9 +1059,13 @@ function deleteChapter(cid){
   saveState(); openSubjectDetail(activeSubjectId);
 }
 function deleteSubject(id){
-  if(!confirm('Hapus mata pelajaran ini beserta datanya?')) return;
-  state.subjects = state.subjects.filter(s=>s.id!==id);
-  saveState(); renderAll();
+  pendingDeleteSubjectId = id;
+  openModal('modal-confirm-subject');
+}
+function confirmDeleteSubject(){
+  state.subjects = state.subjects.filter(s=>s.id!==pendingDeleteSubjectId);
+  pendingDeleteSubjectId = null;
+  saveState(); closeModal('modal-confirm-subject'); renderAll();
 }
 
 /* ================= TASKS ================= */
@@ -1267,6 +1297,15 @@ function renderNotes(){
   else editor.style.display='none';
 }
 function selectNote(id){ state.activeNoteId=id; renderNotes(); }
+function deleteNote(){
+  if(!state.activeNoteId) return;
+  openModal('modal-confirm-note');
+}
+function confirmDeleteNote(){
+  state.notes = state.notes.filter(n=>n.id!==state.activeNoteId);
+  state.activeNoteId = state.notes.length ? state.notes[0].id : null;
+  saveState(); closeModal('modal-confirm-note'); renderNotes();
+}
 function loadNoteIntoEditor(id){
   const n = state.notes.find(n=>n.id===id);
   document.getElementById('note-title').value = n.title;
