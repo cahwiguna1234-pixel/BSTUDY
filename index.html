@@ -513,6 +513,7 @@ label{font-size:11.5px;color:var(--ink-soft);font-weight:700;display:block;margi
           <div style="display:flex;gap:8px;">
             <button class="btn secondary small" onclick="openCardModal()">+ Tambah kartu</button>
             <button class="btn small" onclick="startStudy()">Mulai belajar</button>
+            <button class="btn danger small" onclick="deleteDeck()">🗑️ Hapus deck</button>
           </div>
         </div>
         <div class="card" id="deck-card-list"></div>
@@ -586,6 +587,17 @@ label{font-size:11.5px;color:var(--ink-soft);font-weight:700;display:block;margi
       <button class="btn" onclick="authSignIn()">Masuk</button>
     </div>
     <p id="auth-offline-note" style="font-size:11px;color:var(--ink-faint);margin-top:14px;display:none;">Supabase belum diatur — data akan disimpan hanya di perangkat ini.</p>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-confirm-deck">
+  <div class="modal" style="max-width:340px;">
+    <h3>Hapus deck ini?</h3>
+    <p style="font-size:13.5px;color:var(--ink-soft);margin-top:-8px;">Semua kartu di dalam deck ini juga akan terhapus. Tindakan ini tidak bisa dibatalkan.</p>
+    <div class="modal-close-row">
+      <button class="btn secondary" onclick="closeModal('modal-confirm-deck')">Batal</button>
+      <button class="btn danger" onclick="confirmDeleteDeck()">Ya, hapus</button>
+    </div>
   </div>
 </div>
 
@@ -1218,9 +1230,12 @@ function renderDecks(){
   const grid = document.getElementById('decks-grid');
   grid.innerHTML = state.decks.length ? state.decks.map(d=>{
     const s = subjectById(d.subjectId);
-    return `<div class="card deck-card" onclick="openDeckDetail('${d.id}')"><div class="stack"></div>
-      <h3>${s?s.emoji+' ':'🗂️ '}${escapeHtml(d.name)}</h3>
-      <div class="count">${d.cards.length} kartu ${s?'· '+escapeHtml(s.name):''}</div>
+    return `<div class="card deck-card"><div class="stack"></div>
+      <button class="icon-btn" style="position:absolute;top:12px;right:12px;z-index:1;" onclick="event.stopPropagation(); activeDeckId='${d.id}'; deleteDeck();">✕</button>
+      <div onclick="openDeckDetail('${d.id}')" style="cursor:pointer;">
+        <h3>${s?s.emoji+' ':'🗂️ '}${escapeHtml(d.name)}</h3>
+        <div class="count">${d.cards.length} kartu ${s?'· '+escapeHtml(s.name):''}</div>
+      </div>
     </div>`;
   }).join('') : `<div class="empty" style="grid-column:1/-1;"><div class="em">🗂️</div><b>Belum ada deck</b>Buat deck flashcard pertamamu.</div>`;
 }
@@ -1237,18 +1252,50 @@ function closeDeckDetail(){
   document.getElementById('decks-grid').style.display='grid';
   document.getElementById('deck-detail').style.display='none';
 }
+function deleteDeck(){
+  if(!activeDeckId) return;
+  openModal('modal-confirm-deck');
+}
+function confirmDeleteDeck(){
+  state.decks = state.decks.filter(d=>d.id!==activeDeckId);
+  activeDeckId = null;
+  saveState(); closeModal('modal-confirm-deck'); closeDeckDetail(); renderDecks();
+}
 function renderDeckDetail(){
   const d = state.decks.find(d=>d.id===activeDeckId);
   document.getElementById('deck-detail-title').textContent = d.name;
   document.getElementById('deck-card-list').innerHTML = d.cards.length ? d.cards.map(c=>
-    `<div class="card-list-row"><div class="q">${escapeHtml(c.q)}</div><div class="a">${escapeHtml(c.a)}</div><button class="icon-btn" onclick="deleteCard('${c.id}')">✕</button></div>`
+    `<div class="card-list-row"><div class="q">${escapeHtml(c.q)}</div><div class="a">${escapeHtml(c.a)}</div><button class="icon-btn" onclick="openCardModal('${c.id}')" style="color:var(--sky-deep);">✎</button><button class="icon-btn" onclick="deleteCard('${c.id}')">✕</button></div>`
   ).join('') : `<div class="empty">Belum ada kartu. Klik "+ Tambah kartu".</div>`;
 }
-function openCardModal(){ document.getElementById('card-q').value=''; document.getElementById('card-a').value=''; openModal('modal-card'); }
+let editingCardId=null;
+function openCardModal(cardId){
+  editingCardId = cardId || null;
+  const modalTitle = document.querySelector('#modal-card h3');
+  if(editingCardId){
+    const d = state.decks.find(d=>d.id===activeDeckId);
+    const c = d.cards.find(c=>c.id===editingCardId);
+    document.getElementById('card-q').value = c.q;
+    document.getElementById('card-a').value = c.a;
+    modalTitle.textContent = 'Edit kartu';
+  } else {
+    document.getElementById('card-q').value='';
+    document.getElementById('card-a').value='';
+    modalTitle.textContent = 'Kartu baru';
+  }
+  openModal('modal-card');
+}
 function saveCard(){
   const q = document.getElementById('card-q').value.trim(); const a = document.getElementById('card-a').value.trim();
   if(!q||!a) return;
-  const d = state.decks.find(d=>d.id===activeDeckId); d.cards.push({id:uid(), q, a});
+  const d = state.decks.find(d=>d.id===activeDeckId);
+  if(editingCardId){
+    const c = d.cards.find(c=>c.id===editingCardId);
+    c.q = q; c.a = a;
+  } else {
+    d.cards.push({id:uid(), q, a});
+  }
+  editingCardId = null;
   saveState(); closeModal('modal-card'); renderDeckDetail(); renderDecks();
 }
 function deleteCard(cid){
