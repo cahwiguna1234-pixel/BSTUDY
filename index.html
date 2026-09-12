@@ -180,6 +180,7 @@ label{font-size:11.5px;color:var(--ink-soft);font-weight:700;display:block;margi
 .form-row>*{flex:1;}
 
 .badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;background:rgba(0,0,0,.06);color:var(--ink-soft);}
+.mobile-account{display:none;}
 .badge .sw{width:7px;height:7px;border-radius:50%;}
 .badge.due-overdue{background:rgba(198,69,60,.14);color:var(--danger);}
 .badge.due-today{background:rgba(240,180,41,.2);color:#8a6100;}
@@ -397,15 +398,38 @@ label{font-size:11.5px;color:var(--ink-soft);font-weight:700;display:block;margi
 
 @media(max-width:820px){
   .app{flex-direction:column;}
-  .sidebar{width:100%;flex-direction:row;overflow-x:auto;}
-  .brand{padding:14px 16px;}
-  nav.tabs{flex-direction:row;margin-top:0;padding:10px;}
+  .sidebar{width:100%;flex-direction:row;overflow-x:auto;align-items:center;}
+  .brand{padding:14px 16px;flex-shrink:0;}
+  nav.tabs{flex-direction:row;margin-top:0;padding:10px;flex-shrink:0;}
   .tab-btn span.lbl{display:none;}
   .sidebar-foot{display:none;}
+  .mobile-account{
+    display:flex;align-items:center;gap:10px;margin-left:auto;margin-right:10px;flex-shrink:0;
+  }
+  .mobile-account .streak{display:flex;align-items:center;gap:4px;font-size:13px;color:#fff;font-weight:700;}
+  .mobile-account .logout-ic{
+    background:rgba(255,255,255,.12);border:none;color:#fff;width:32px;height:32px;border-radius:9px;
+    display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;flex-shrink:0;
+  }
   .main{padding:20px 16px 50px;}
   .notes-layout{flex-direction:column;}
   .notes-list{flex-direction:row;overflow-x:auto;max-height:none;}
+  .note-editor textarea{min-height:220px;}
   .hero{flex-direction:column;align-items:flex-start;}
+  .hero-btn{width:100%;text-align:center;}
+  .pomo-wrap{justify-content:center;}
+  .pomo-timer{flex:1 1 100%;max-width:340px;margin:0 auto;}
+  .topbar{align-items:stretch;}
+  .topbar > div:last-child{display:flex;gap:8px;width:100%;}
+  .topbar > div:last-child .btn{flex:1;}
+  .topbar > button.btn:last-child{width:100%;}
+}
+@media(max-width:480px){
+  .grid.cols-4, .grid.cols-3, .grid.cols-2{grid-template-columns:1fr;}
+  .week-grid{grid-template-columns:1fr;}
+  .schedule-stats{gap:14px;}
+  .modal{padding:18px 16px;}
+  .topbar > div:last-child{flex-direction:column;}
 }
 </style>
 </head>
@@ -416,6 +440,10 @@ label{font-size:11.5px;color:var(--ink-soft);font-weight:700;display:block;margi
     <div class="brand">
       <div class="logo">🦉</div>
       <div class="txt"><div class="mark">BSTUDY</div><div class="sub">ruang belajar pribadimu</div></div>
+      <div class="mobile-account">
+        <span class="streak">🔥 <span id="streak-mini-mobile">0</span></span>
+        <button class="logout-ic" id="mobile-logout-btn" onclick="authSignOut()" style="display:none;" title="Keluar">⏻</button>
+      </div>
     </div>
     <nav class="tabs" id="tabs"></nav>
     <div class="sidebar-foot">
@@ -842,6 +870,8 @@ async function onLoggedIn(){
   document.getElementById('modal-auth').classList.remove('active');
   document.getElementById('account-box').style.display = 'block';
   document.getElementById('account-email').textContent = currentUser.email;
+  const mobileLogout = document.getElementById('mobile-logout-btn');
+  if(mobileLogout) mobileLogout.style.display = 'flex';
   await loadState();
 }
 
@@ -1086,7 +1116,12 @@ function computeStreak(){
   while(daysWithSession.has(todayStr(cur))){ streak++; cur.setDate(cur.getDate()-1); }
   return streak;
 }
-function renderStreakMini(){ document.getElementById('streak-mini').textContent = computeStreak(); }
+function renderStreakMini(){
+  const val = computeStreak();
+  document.getElementById('streak-mini').textContent = val;
+  const mobileEl = document.getElementById('streak-mini-mobile');
+  if(mobileEl) mobileEl.textContent = val;
+}
 
 /* ================= SUBJECTS ================= */
 function openSubjectModal(){
