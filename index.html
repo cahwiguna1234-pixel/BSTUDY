@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BSTUDY — Ruang Belajarmu</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BSTUDY">
+<meta name="theme-color" content="#1F5A85">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Work+Sans:wght@400;500;600;700&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/canvas-confetti/1.9.2/confetti.browser.min.js"></script>
@@ -602,6 +607,7 @@ label{font-size:11.5px;color:var(--ink-soft);font-weight:700;display:block;margi
         <div><h1>Catatan</h1><div class="date">Simpan rangkuman & ide belajarmu</div></div>
         <button class="btn" onclick="createNote()">+ Catatan baru</button>
       </div>
+      <div id="notes-filter-banner"></div>
       <div class="notes-layout">
         <div class="notes-list" id="notes-list"></div>
         <div class="note-editor" id="note-editor" style="display:none;">
@@ -609,7 +615,10 @@ label{font-size:11.5px;color:var(--ink-soft);font-weight:700;display:block;margi
             <input type="text" class="title-input" id="note-title" placeholder="Judul catatan" style="flex:1;">
             <button class="btn danger small" onclick="deleteNote()" style="flex-shrink:0;margin-top:2px;">🗑️ Hapus</button>
           </div>
-          <select id="note-subject" style="width:220px;margin-bottom:12px;"></select>
+          <div class="form-row" style="margin-bottom:12px;">
+            <select id="note-subject" onchange="onNoteSubjectChange()"></select>
+            <select id="note-chapter"></select>
+          </div>
           <textarea id="note-body" placeholder="Tulis catatanmu di sini..."></textarea>
         </div>
       </div>
@@ -817,6 +826,9 @@ function boom(x=0.5,y=0.4){
 const SUPABASE_URL = 'https://fyxetbltiivhyfunzert.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5eGV0Ymx0aWl2aHlmdW56ZXJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5OTQwMzcsImV4cCI6MjEwNDU3MDAzN30.qgsBdwzNVLkgXOq7smS5mcwWuP3KoNGtCYyWG9_0jnE';
 
+// Kunci publik VAPID untuk push notification (sudah digenerate, aman untuk ditaruh di kode klien)
+const VAPID_PUBLIC_KEY = 'BLZpdfYs0OSW2rWV5dwH72XTDM1wozibb6Jpn6e1iVpd-Ydt2R5WGIY6bqgAqpLJk4iAWVTvjXQEOj9GMeVYYlw';
+
 const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY)
   ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
@@ -873,6 +885,7 @@ async function onLoggedIn(){
   const mobileLogout = document.getElementById('mobile-logout-btn');
   if(mobileLogout) mobileLogout.style.display = 'flex';
   await loadState();
+  if('Notification' in window && Notification.permission==='granted') subscribeToPush();
 }
 
 /* ================= STORAGE ADAPTER =================
@@ -1029,16 +1042,54 @@ function renderUrgentBanner(){
 function updateNotifBtn(){
   const btn = document.getElementById('notif-btn');
   if(!btn) return;
-  if(!('Notification' in window)){ btn.style.display='none'; return; }
-  if(Notification.permission==='granted'){ btn.textContent='🔔 Notifikasi aktif'; btn.disabled=true; }
-  else if(Notification.permission==='denied'){ btn.textContent='🔕 Notifikasi diblokir browser'; btn.disabled=true; }
-  else { btn.textContent='🔔 Aktifkan notifikasi'; btn.disabled=false; }
+  if(!('Notification' in window)){
+    btn.textContent = '🔕 Notifikasi tidak didukung browser ini';
+    btn.disabled = true;
+    btn.title = 'Coba buka di Chrome Android, atau tambahkan situs ini ke Layar Utama di iPhone (iOS 16.4+).';
+    return;
+  }
+  if(Notification.permission==='granted'){ btn.textContent='🔔 Notifikasi aktif'; btn.disabled=true; btn.title=''; }
+  else if(Notification.permission==='denied'){ btn.textContent='🔕 Notifikasi diblokir browser'; btn.disabled=true; btn.title='Aktifkan izin notifikasi lewat pengaturan situs di browsermu.'; }
+  else { btn.textContent='🔔 Aktifkan notifikasi'; btn.disabled=false; btn.title=''; }
 }
 async function requestNotifPermission(){
   if(!('Notification' in window)) return;
   const res = await Notification.requestPermission();
   updateNotifBtn();
-  if(res==='granted') checkDueNotifications();
+  if(res==='granted'){
+    checkDueNotifications();
+    await subscribeToPush();
+  }
+}
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(c=>c.charCodeAt(0)));
+}
+async function subscribeToPush(){
+  if(!supabaseClient || !currentUser){ return; } // push lintas-device butuh akun Supabase
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    console.warn('Push API tidak didukung browser ini.');
+    return;
+  }
+  try{
+    const reg = await navigator.serviceWorker.register('sw.js');
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub){
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+    const json = sub.toJSON();
+    await supabaseClient.from('push_subscriptions').upsert({
+      user_id: currentUser.id,
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth
+    }, { onConflict: 'endpoint' });
+  }catch(e){ console.error('Gagal subscribe push', e); }
 }
 function checkDueNotifications(){
   if(!('Notification' in window) || Notification.permission!=='granted') return;
@@ -1170,11 +1221,15 @@ let pendingDeleteSubjectId=null;
 function openSubjectDetail(id){
   activeSubjectId=id;
   const s = subjectById(id);
-  const list = s.chapters.map(c=>`<div class="chapter-row ${c.done?'done':''}">
+  const list = s.chapters.map(c=>{
+    const noteCount = state.notes.filter(n=>n.chapterId===c.id).length;
+    return `<div class="chapter-row ${c.done?'done':''}">
       <div class="chk ${c.done?'on':''}" onclick="toggleChapter('${c.id}',event)">${c.done?'✓':''}</div>
       <div class="ct" style="flex:1;">${escapeHtml(c.name)}</div>
+      <button class="btn secondary small" onclick="openNotesForChapter('${c.id}','${s.id}')">📝 Catatan${noteCount?` (${noteCount})`:''}</button>
       <button class="icon-btn" onclick="deleteChapter('${c.id}')">✕</button>
-    </div>`).join('') || `<div class="empty">Belum ada topik. Tambahkan di bawah.</div>`;
+    </div>`;
+  }).join('') || `<div class="empty">Belum ada topik. Tambahkan di bawah.</div>`;
   const box = document.getElementById('subjects-grid');
   box.innerHTML = `<div class="card" style="grid-column:1/-1;">
     <div class="section-title" style="margin-top:0;">
@@ -1463,20 +1518,75 @@ function nextCard(){ const d = state.decks.find(d=>d.id===activeDeckId); studyIn
 function prevCard(){ const d = state.decks.find(d=>d.id===activeDeckId); studyIndex = (studyIndex-1+d.cards.length) % d.cards.length; renderStudyCard(); }
 
 /* ================= NOTES ================= */
+let notesFilterChapterId = null; // null = tampilkan semua catatan
+
+function fillNoteChapterSelect(subjectId, selectedChapterId){
+  const chSel = document.getElementById('note-chapter');
+  const subj = subjectById(subjectId);
+  if(!subj || !subj.chapters.length){
+    chSel.innerHTML = '<option value="">(tanpa topik spesifik)</option>';
+    chSel.disabled = true;
+    return;
+  }
+  chSel.disabled = false;
+  chSel.innerHTML = '<option value="">(catatan umum mapel ini)</option>' +
+    subj.chapters.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  chSel.value = selectedChapterId || '';
+}
+function onNoteSubjectChange(){
+  fillNoteChapterSelect(document.getElementById('note-subject').value, null);
+}
+function openNotesForChapter(chapterId, subjectId){
+  notesFilterChapterId = chapterId;
+  switchView('notes');
+  renderNotes();
+}
+function clearNotesFilter(){
+  notesFilterChapterId = null;
+  renderNotes();
+}
 function createNote(){
-  const note = {id:uid(), title:'Catatan baru', subjectId:null, body:'', updated:Date.now()};
+  const note = {
+    id:uid(), title:'Catatan baru', body:'', updated:Date.now(),
+    subjectId: notesFilterChapterId ? findSubjectIdByChapter(notesFilterChapterId) : null,
+    chapterId: notesFilterChapterId || null
+  };
   state.notes.unshift(note); state.activeNoteId = note.id;
   saveState(); renderNotes();
 }
+function findSubjectIdByChapter(chapterId){
+  const s = state.subjects.find(s=>s.chapters.some(c=>c.id===chapterId));
+  return s ? s.id : null;
+}
+function renderNotesFilterBanner(){
+  const slot = document.getElementById('notes-filter-banner');
+  if(!notesFilterChapterId){ slot.innerHTML=''; return; }
+  const subj = state.subjects.find(s=>s.chapters.some(c=>c.id===notesFilterChapterId));
+  const chapter = subj ? subj.chapters.find(c=>c.id===notesFilterChapterId) : null;
+  const name = chapter ? escapeHtml(chapter.name) : 'topik ini';
+  slot.innerHTML = `<div class="urgent-banner" style="background:linear-gradient(120deg,#EAF4FC,#FBF0DC);border-color:var(--sky-line);">
+    <span class="ic">📝</span>
+    <div class="txt" style="color:var(--sky-deep);"><b>Menampilkan catatan topik: ${name}</b></div>
+    <button class="btn secondary small" onclick="clearNotesFilter()">Lihat semua catatan</button>
+  </div>`;
+}
 function renderNotes(){
+  renderNotesFilterBanner();
   const list = document.getElementById('notes-list'); const editor = document.getElementById('note-editor');
-  if(state.notes.length===0){ list.innerHTML = `<div class="empty">📝 Belum ada catatan</div>`; editor.style.display='none'; return; }
-  list.innerHTML = state.notes.slice().sort((a,b)=>b.updated-a.updated).map(n=>`
+  const source = notesFilterChapterId ? state.notes.filter(n=>n.chapterId===notesFilterChapterId) : state.notes;
+  if(source.length===0){
+    list.innerHTML = `<div class="empty">📝 ${notesFilterChapterId?'Belum ada catatan untuk topik ini':'Belum ada catatan'}</div>`;
+    editor.style.display='none';
+    return;
+  }
+  list.innerHTML = source.slice().sort((a,b)=>b.updated-a.updated).map(n=>`
     <div class="note-item ${n.id===state.activeNoteId?'active':''}" onclick="selectNote('${n.id}')">
       <div class="nt">${escapeHtml(n.title)||'(tanpa judul)'}</div>
       <div class="nd">${new Date(n.updated).toLocaleDateString('id-ID',{day:'numeric',month:'short'})}</div>
     </div>`).join('');
-  if(state.activeNoteId && state.notes.find(n=>n.id===state.activeNoteId)){ editor.style.display='block'; loadNoteIntoEditor(state.activeNoteId); }
+  const activeInList = state.activeNoteId && source.find(n=>n.id===state.activeNoteId);
+  if(activeInList){ editor.style.display='block'; loadNoteIntoEditor(state.activeNoteId); }
+  else if(source.length){ state.activeNoteId = source[0].id; editor.style.display='block'; loadNoteIntoEditor(state.activeNoteId); }
   else editor.style.display='none';
 }
 function selectNote(id){ state.activeNoteId=id; renderNotes(); }
@@ -1495,10 +1605,11 @@ function loadNoteIntoEditor(id){
   document.getElementById('note-body').value = n.body;
   fillSubjectSelects();
   document.getElementById('note-subject').value = n.subjectId || '';
+  fillNoteChapterSelect(n.subjectId, n.chapterId);
 }
 let noteSaveTimer=null;
 function bindNoteAutosave(){
-  ['note-title','note-body','note-subject'].forEach(id=>{
+  ['note-title','note-body','note-subject','note-chapter'].forEach(id=>{
     document.getElementById(id).addEventListener('input', ()=>{
       clearTimeout(noteSaveTimer);
       noteSaveTimer = setTimeout(()=>{
@@ -1506,6 +1617,7 @@ function bindNoteAutosave(){
         n.title = document.getElementById('note-title').value;
         n.body = document.getElementById('note-body').value;
         n.subjectId = document.getElementById('note-subject').value || null;
+        n.chapterId = document.getElementById('note-chapter').value || null;
         n.updated = Date.now();
         saveState();
         const item = document.querySelector('.note-item.active .nt');
